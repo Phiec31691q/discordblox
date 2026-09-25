@@ -91,11 +91,14 @@ const commands = [
 client.once('ready', async () => {
     console.log(`[STUDIOBLOX] ${client.user.tag} aktif ve göreve hazır!`);
 
-    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
+    const token = (process.env.TOKEN || '').trim();
+    const clientId = (process.env.CLIENT_ID || client.user.id).trim();
+
+    const rest = new REST({ version: '10' }).setToken(token);
     try {
         console.log('[BOT] Slash komutları Discord API\'ye yükleniyor...');
         await rest.put(
-            Routes.applicationCommands(process.env.CLIENT_ID || client.user.id),
+            Routes.applicationCommands(clientId),
             { body: commands }
         );
         console.log('[BOT] TÜM Slash komutları başarıyla kaydedildi!');
@@ -108,13 +111,11 @@ client.once('ready', async () => {
 client.on('guildMemberAdd', async (member) => {
     const guildId = member.guild.id;
 
-    // Otorol
     if (db.autorole[guildId]) {
         const role = member.guild.roles.cache.get(db.autorole[guildId]);
         if (role) member.roles.add(role).catch(() => {});
     }
 
-    // Sayaç
     if (db.usercount[guildId]) {
         const { channelId, target } = db.usercount[guildId];
         const channel = member.guild.channels.cache.get(channelId);
@@ -129,11 +130,9 @@ client.on('guildMemberAdd', async (member) => {
 // --- 7. ETKİLEŞİM VE KOMUT YÖNETİCİSİ ---
 client.on('interactionCreate', async (interaction) => {
 
-    // === A. SLASH KOMUTLARI ===
     if (interaction.isChatInputCommand()) {
         const { commandName, options, guild, channel, member } = interaction;
 
-        // MODERASYON
         if (commandName === 'ban') {
             if (!member.permissions.has(PermissionFlagsBits.BanMembers)) return interaction.reply({ content: 'Yetkiniz yetersiz!', ephemeral: true });
             const target = options.getUser('hedef');
@@ -220,7 +219,6 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: `✅ Otorol **${role.name}** olarak ayarlandı.` });
         }
 
-        // TICKET SISTEMLERI
         if (commandName === 'ticket-kur' || commandName === 'ticket-kur-mequeen') {
             if (!member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: 'Yönetici yetkisi gerekli!', ephemeral: true });
             const targetChannel = options.getChannel('kanal');
@@ -242,7 +240,6 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: '✅ Destek sistemi başarıyla kuruldu.', ephemeral: true });
         }
 
-        // ÇEKİLİŞ SISTEMI
         if (commandName === 'cekilis-baslat') {
             if (!member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: 'Yönetici yetkisi gerekli!', ephemeral: true });
             const odul = options.getString('odul');
@@ -264,7 +261,6 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: 'Çekiliş başlatıldı.', ephemeral: true });
         }
 
-        // EKONOMİ & ROBUX
         if (commandName === 'robux') {
             const embed = new EmbedBuilder()
                 .setTitle('💎 Studioblox Robux Stok & Fiyatlandırma')
@@ -281,7 +277,6 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ embeds: [embed] });
         }
 
-        // BAŞVURU SİSTEMİ
         if (commandName === 'basvuru-sistemi') {
             if (!member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: 'Yönetici yetkisi gerekli!', ephemeral: true });
             const targetChannel = options.getChannel('kanal');
@@ -298,7 +293,6 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: 'Başvuru paneli kuruldu.', ephemeral: true });
         }
 
-        // SAYAÇ KUR
         if (commandName === 'sayac-kur') {
             if (!member.permissions.has(PermissionFlagsBits.Administrator)) return interaction.reply({ content: 'Yönetici yetkisi gerekli!', ephemeral: true });
             const ch = options.getChannel('kanal');
@@ -308,7 +302,6 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: `✅ Sayaç kanalı ${ch} ve hedef **${target}** olarak ayarlandı.` });
         }
 
-        // YARDIM KOMUTU
         if (commandName === 'yardim') {
             const embed = new EmbedBuilder()
                 .setTitle('🤖 Studioblox Bot Komut Menüsü')
@@ -323,11 +316,9 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // === B. BUTON VE FORM (MODAL) ETKİLEŞİMLERİ ===
     if (interaction.isButton()) {
         const { customId, guild, user, channel } = interaction;
 
-        // BİLET AÇMA BUTONU
         if (customId === 'ticket_open_standard' || customId === 'ticket_open_mequeen') {
             const ticketChannel = await guild.channels.create({
                 name: `bilet-${user.username}`,
@@ -351,13 +342,11 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: `Biletiniz açıldı: ${ticketChannel}`, ephemeral: true });
         }
 
-        // BİLET KAPATMA BUTONU
         if (customId === 'ticket_close') {
             await interaction.reply('Bilet 5 saniye içinde kapatılıyor...');
             setTimeout(() => channel.delete().catch(() => {}), 5000);
         }
 
-        // ÇEKİLİŞE KATILMA BUTONU
         if (customId === 'giveaway_join') {
             const giveaway = db.giveaways[interaction.message.id];
             if (!giveaway) return interaction.reply({ content: 'Çekiliş bulunamadı.', ephemeral: true });
@@ -371,7 +360,6 @@ client.on('interactionCreate', async (interaction) => {
             return interaction.reply({ content: '🎉 Çekilişe başarıyla katıldınız!', ephemeral: true });
         }
 
-        // BAŞVURU FORMU AÇMA
         if (customId === 'open_apply_modal') {
             const modal = new ModalBuilder().setCustomId('apply_modal').setTitle('Yetkili Başvuru Formu');
             const ageInput = new TextInputBuilder().setCustomId('age').setLabel('Yaşınız').setStyle(TextInputStyle.Short).setRequired(true);
@@ -382,7 +370,6 @@ client.on('interactionCreate', async (interaction) => {
         }
     }
 
-    // FORM GÖNDERİLDİĞİNDE
     if (interaction.isModalSubmit()) {
         if (interaction.customId === 'apply_modal') {
             const age = interaction.fields.getTextInputValue('age');
@@ -393,5 +380,16 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// --- 8. BOT GİRİŞİ ---
-client.login(process.env.TOKEN);
+// --- 8. DETAYLI BOT GİRİŞİ VEYA HATA YAZDIRMA ---
+const botToken = (process.env.TOKEN || '').trim();
+
+if (!botToken) {
+    console.error('❌ HATA: Render Environment üzerinde "TOKEN" adında bir değişken bulunamadı veya boş!');
+} else {
+    console.log(`[BILGI] Token bulundu (Uzunluk: ${botToken.length}). Discord\'a giriş deneniyor...`);
+    client.login(botToken)
+        .then(() => console.log('[BILGI] Discord sunucularına bağlantı isteği iletildi.'))
+        .catch(err => {
+            console.error('❌ DISCORD GIRIŞ HATASI VERDI:', err.message || err);
+        });
+}
