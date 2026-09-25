@@ -1,5 +1,3 @@
-const dns = require('dns');
-dns.setDefaultResultOrder('ipv4first');
 const { 
     Client, 
     GatewayIntentBits, 
@@ -36,28 +34,24 @@ const client = new Client({
     ]
 });
 
-// --- 3. KRİTİK HATA VE WEBSOCKET YAKALAYICILARI ---
+// --- 3. KRİTİK HATA YAKALAYICILARI ---
 client.on('error', err => console.error('❌ [CLIENT HATASI]:', err));
-client.on('shardError', (err, id) => console.error(`❌ [WEBSOCKET / SHARD HATASI - Shard ${id}]:`, err));
-process.on('unhandledRejection', (reason, p) => console.error('❌ [YAKALANMAYAN PROMISE HATASI]:', reason));
+client.on('shardError', (err, id) => console.error(`❌ [WEBSOCKET HATASI]:`, err));
+process.on('unhandledRejection', reason => console.error('❌ [UNHANDLED REJECTION]:', reason));
 
-// --- 4. GEÇİCİ VERİTABANI VE SİSTEM HAFIZASI ---
+// --- 4. VERİTABANI ---
 const dbFilePath = path.join(__dirname, 'data.json');
 let db = { warnings: {}, autorole: {}, usercount: {}, giveaways: {} };
 
 if (fs.existsSync(dbFilePath)) {
-    try {
-        db = JSON.parse(fs.readFileSync(dbFilePath, 'utf8'));
-    } catch (e) {
-        console.error('Veritabanı okuma hatası:', e);
-    }
+    try { db = JSON.parse(fs.readFileSync(dbFilePath, 'utf8')); } catch (e) {}
 }
 
 function saveDB() {
     fs.writeFileSync(dbFilePath, JSON.stringify(db, null, 2));
 }
 
-// --- 5. TÜM SLASH KOMUTLARI ---
+// --- 5. SLASH KOMUTLARI ---
 const commands = [
     new SlashCommandBuilder().setName('ban').setDescription('Kullanıcıyı sunucudan yasaklar').addUserOption(o => o.setName('hedef').setDescription('Kullanıcı').setRequired(true)).addStringOption(o => o.setName('sebep').setDescription('Sebep')).toJSON(),
     new SlashCommandBuilder().setName('kick').setDescription('Kullanıcıyı sunucudan atar').addUserOption(o => o.setName('hedef').setDescription('Kullanıcı').setRequired(true)).addStringOption(o => o.setName('sebep').setDescription('Sebep')).toJSON(),
@@ -90,10 +84,7 @@ client.once('ready', async () => {
     const rest = new REST({ version: '10' }).setToken(token);
     try {
         console.log('[BOT] Slash komutları yükleniyor...');
-        await rest.put(
-            Routes.applicationCommands(clientId),
-            { body: commands }
-        );
+        await rest.put(Routes.applicationCommands(clientId), { body: commands });
         console.log('[BOT] TÜM Slash komutları yüklendi!');
     } catch (error) {
         console.error('[HATA] Slash komutları yüklenemedi:', error);
@@ -120,7 +111,7 @@ client.on('guildMemberAdd', async (member) => {
     }
 });
 
-// --- 8. ETKİLEŞİM VE KOMUT DİNLEYİCİSİ ---
+// --- 8. ETKİLEŞİM DİNLEYİCİSİ ---
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand()) {
         const { commandName, options, guild, channel, member } = interaction;
@@ -372,14 +363,28 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// --- 9. BOT GİRİŞİ ---
+// --- 9. DOĞRUDAN DISCORD API TESTİ VE BAĞLANTI ---
 const botToken = (process.env.TOKEN || '').trim();
 
-if (!botToken) {
-    console.error('❌ HATA: Render üzerinde TOKEN bulunamadı!');
-} else {
-    console.log(`[BILGI] Token bulundu. Bağlantı başlatılıyor...`);
-    client.login(botToken).catch(err => {
-        console.error('❌ DISCORD LOGIN HATASI:', err);
-    });
+async function startBot() {
+    console.log('[TEST] Discord API doğrudan sorgulanıyor...');
+    try {
+        const res = await fetch('https://discord.com/api/v10/users/@me', {
+            headers: { Authorization: `Bot ${botToken}` }
+        });
+        const data = await res.json();
+        
+        if (res.status === 200) {
+            console.log(`✅ DISCORD API BAŞARILI! Bağlanan Bot Adı: ${data.username} (Bot ID: ${data.id})`);
+        } else {
+            console.error(`❌ DISCORD API SORGUSU BAŞARISIZ! HTTP Kodu: ${res.status}`, data);
+        }
+    } catch (err) {
+        console.error('❌ DISCORD API\'YE ERİŞİLEMEDİ:', err.message);
+    }
+
+    console.log('[BILGI] discord.js istemcisi başlatılıyor...');
+    client.login(botToken).catch(err => console.error('❌ LOGIN CATCH:', err));
 }
+
+startBot();
