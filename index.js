@@ -1,3 +1,6 @@
+const dns = require('dns');
+dns.setDefaultResultOrder('ipv4first');
+
 const { 
     Client, 
     GatewayIntentBits, 
@@ -18,7 +21,7 @@ const express = require('express');
 const fs = require('fs');
 const path = require('path');
 
-// --- 1. RENDER UPTIME SUNUCUSU ---
+// --- 1. UPTIME WEB SUNUCUSU ---
 const app = express();
 app.get('/', (req, res) => res.send('Studioblox Bot 7/24 Aktif!'));
 app.listen(process.env.PORT || 3000, () => console.log('[WEB] Uptime sunucusu hazır.'));
@@ -34,12 +37,7 @@ const client = new Client({
     ]
 });
 
-// --- 3. KRİTİK HATA YAKALAYICILARI ---
-client.on('error', err => console.error('❌ [CLIENT HATASI]:', err));
-client.on('shardError', (err, id) => console.error(`❌ [WEBSOCKET HATASI]:`, err));
-process.on('unhandledRejection', reason => console.error('❌ [UNHANDLED REJECTION]:', reason));
-
-// --- 4. VERİTABANI ---
+// --- 3. VERİTABANI HAFIZASI ---
 const dbFilePath = path.join(__dirname, 'data.json');
 let db = { warnings: {}, autorole: {}, usercount: {}, giveaways: {} };
 
@@ -51,7 +49,7 @@ function saveDB() {
     fs.writeFileSync(dbFilePath, JSON.stringify(db, null, 2));
 }
 
-// --- 5. SLASH KOMUTLARI ---
+// --- 4. SLASH KOMUTLARI ---
 const commands = [
     new SlashCommandBuilder().setName('ban').setDescription('Kullanıcıyı sunucudan yasaklar').addUserOption(o => o.setName('hedef').setDescription('Kullanıcı').setRequired(true)).addStringOption(o => o.setName('sebep').setDescription('Sebep')).toJSON(),
     new SlashCommandBuilder().setName('kick').setDescription('Kullanıcıyı sunucudan atar').addUserOption(o => o.setName('hedef').setDescription('Kullanıcı').setRequired(true)).addStringOption(o => o.setName('sebep').setDescription('Sebep')).toJSON(),
@@ -74,24 +72,23 @@ const commands = [
     new SlashCommandBuilder().setName('yardim').setDescription('Tüm bot komutlarını ve kategorilerini gösterir').toJSON()
 ];
 
-// --- 6. READY EVENT ---
+// --- 5. READY EVENT ---
 client.once('ready', async () => {
     console.log(`🟢 [STUDIOBLOX] ${client.user.tag} BARIŞÇIL VE AKTİF ŞEKİLDE ÇALIŞIYOR!`);
 
-    const token = (process.env.TOKEN || '').trim();
-    const clientId = (process.env.CLIENT_ID || client.user.id).trim();
+    const token = (process.env.TOKEN || '').replace(/['"]+/g, '').trim();
+    const clientId = (process.env.CLIENT_ID || client.user.id).replace(/['"]+/g, '').trim();
 
     const rest = new REST({ version: '10' }).setToken(token);
     try {
-        console.log('[BOT] Slash komutları yükleniyor...');
         await rest.put(Routes.applicationCommands(clientId), { body: commands });
-        console.log('[BOT] TÜM Slash komutları yüklendi!');
+        console.log('[BOT] TÜM Slash komutları başarıyla yüklendi!');
     } catch (error) {
         console.error('[HATA] Slash komutları yüklenemedi:', error);
     }
 });
 
-// --- 7. OTOROL & SAYAÇ ---
+// --- 6. OTOROL & SAYAÇ ---
 client.on('guildMemberAdd', async (member) => {
     const guildId = member.guild.id;
 
@@ -111,7 +108,7 @@ client.on('guildMemberAdd', async (member) => {
     }
 });
 
-// --- 8. ETKİLEŞİM DİNLEYİCİSİ ---
+// --- 7. ETKİLEŞİM DİNLEYİCİSİ ---
 client.on('interactionCreate', async (interaction) => {
     if (interaction.isChatInputCommand()) {
         const { commandName, options, guild, channel, member } = interaction;
@@ -363,28 +360,10 @@ client.on('interactionCreate', async (interaction) => {
     }
 });
 
-// --- 9. DOĞRUDAN DISCORD API TESTİ VE BAĞLANTI ---
-const botToken = (process.env.TOKEN || '').trim();
+// --- 8. BOT BAĞLANTISI ---
+const rawToken = process.env.TOKEN || '';
+const botToken = rawToken.replace(/['"]+/g, '').trim();
 
-async function startBot() {
-    console.log('[TEST] Discord API doğrudan sorgulanıyor...');
-    try {
-        const res = await fetch('https://discord.com/api/v10/users/@me', {
-            headers: { Authorization: `Bot ${botToken}` }
-        });
-        const data = await res.json();
-        
-        if (res.status === 200) {
-            console.log(`✅ DISCORD API BAŞARILI! Bağlanan Bot Adı: ${data.username} (Bot ID: ${data.id})`);
-        } else {
-            console.error(`❌ DISCORD API SORGUSU BAŞARISIZ! HTTP Kodu: ${res.status}`, data);
-        }
-    } catch (err) {
-        console.error('❌ DISCORD API\'YE ERİŞİLEMEDİ:', err.message);
-    }
-
-    console.log('[BILGI] discord.js istemcisi başlatılıyor...');
-    client.login(botToken).catch(err => console.error('❌ LOGIN CATCH:', err));
+if (botToken) {
+    client.login(botToken).catch(err => console.error('Hata:', err));
 }
-
-startBot();
