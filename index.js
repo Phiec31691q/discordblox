@@ -1,3 +1,4 @@
+require('net').setDefaultAutoSelectFamily(false);
 /* ============================================================
    STUDIOBLOX v1.0.0 - PROFESYONEL DISCORD BOTU (TEK DOSYA)
    Secret'lar environment'tan okunur, GitHub'a token YAZMA.
