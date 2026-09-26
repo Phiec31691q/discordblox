@@ -1,0 +1,12 @@
+{
+  "name": "stud.io",
+  "version": "1.0.0",
+  "main": "index.js",
+  "scripts": {
+    "start": "node index.js"
+  },
+  "dependencies": {
+    "discord.js": "^14.16.3",
+    "mongodb": "^6.9.0"
+  }
+}
