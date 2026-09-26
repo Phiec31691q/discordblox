@@ -1,9 +1,7 @@
 require('net').setDefaultAutoSelectFamily(false);
 /* ============================================================
-   STUDIOBLOX v3.0.0 - TURKIYE'NIN EN IYI EKONOMI BOTU
-   v3.0: TRADE sistemi, soygun/maden/balik, banka faizi,
-   petbilgi + petindex, OWNER PANEL (sadece owner, ephemeral),
-   ADMIN PANEL (bot adminleri), admin ekleme/cikarma.
+   STUDIOBLOX v3.0.1 - TURKIYE'NIN EN IYI EKONOMI BOTU
+   v3.0.1: syntax hatasi duzeltildi (admin description).
    ============================================================ */
 const {
   Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder,
@@ -18,7 +16,7 @@ const CONFIG = {
   token: process.env.TOKEN || "",
   ownerId: process.env.OWNER_ID || "",
   mequeenBanner: process.env.MEQUEEN_BANNER || "",
-  version: "3.0.0"
+  version: "3.0.1"
 };
 if (!CONFIG.token) { console.error('[HATA] Render Environment icinde TOKEN yok!'); process.exit(1); }
 
@@ -320,7 +318,7 @@ async function executeTrade(t) {
 /* ========================= KOMUTLAR ========================= */
 const CMDS = [];
 
-/* ===================== OWNER PANEL (SADECE OWNER, EPHEMERAL) ===================== */
+/* ===================== OWNER PANEL ===================== */
 function ownerRows() {
   return [
     new ActionRowBuilder().addComponents(
@@ -348,7 +346,7 @@ CMDS.push({
   }
 });
 
-/* ===================== ADMIN PANEL (BOT ADMINLERI) ===================== */
+/* ===================== ADMIN PANEL ===================== */
 function adminRows() {
   return [
     new ActionRowBuilder().addComponents(
@@ -359,7 +357,7 @@ function adminRows() {
   ];
 }
 CMDS.push({
-  data: new SlashCommandBuilder().setName('admin').setDescription('Bot admin paneli (owner'in atadigi adminler)'),
+  data: new SlashCommandBuilder().setName('admin').setDescription("Bot admin paneli (owner'in atadigi adminler)"),
   async execute(i) {
     if (!isAdminBot(i.user.id)) return i.reply({ embeds: [ERR('**Bot admini** degilsin. Owner seni owner panelinden ekleyebilir.')], ephemeral: true });
     return i.reply({ embeds: [E(0x3498DB).setTitle('ADMIN PANEL').setDescription('> Bot admin aracları. Sadece sana gorunur.')], components: adminRows(), ephemeral: true });
@@ -635,7 +633,7 @@ async function annPreview(i) {
 
 /* ===================== CEKILIS ===================== */
 CMDS.push({
-  data: new SlashCommandBuilder().setName('çekiliş').setDescription('Gelismis cekiliş sistemi').setDMPermission(false)
+  data: new SlashCommandBuilder().setName('çekiliş').setDescription('Gelismis cekilis sistemi').setDMPermission(false)
     .addSubcommand(s => s.setName('başlat').setDescription('Baslat')
       .addStringOption(o => o.setName('sure').setDescription('Orn: 3d, 6h, 30m').setRequired(true))
       .addStringOption(o => o.setName('odul').setDescription('Odul').setRequired(true))
@@ -753,7 +751,7 @@ const CATS = {
   cekilis: [['/cekilis baslat', 'Baslat'], ['/cekilis bitir', 'Bitir'], ['/cekilis yeniden', 'Reroll']],
   basvuru: [['/basvuru-sistemi', 'Kurulum'], ['Log butonlari', 'Gor/Kabul/Reddet/Bekle'], ['DM form', 'Butonlu geri donme']],
   dm: [['/dm-at', 'Everyone/Here/Uye (ad ile)']],
-  ekonomi: [['/robux bakiye', 'Detayli profil'], ['/robux cash', 'Transfer'], ['/robux gunluk', 'Gunluk + streak + faiz'], ['/robux calis', 'Is'], ['/robux ara', 'Arama'], ['/robux maden', 'Maden kazisi'], ['/robux balik', 'Balik avı'], ['/robux soygun', 'Uye soygun (riskli)'], ['/robux yazitura', 'Coinflip'], ['/robux bahis', 'Zar'], ['/robux duel', 'Duello'], ['/robux trade', 'PET/ESYA/NAKIT trade'], ['/robux yatir / cek', 'Banka'], ['/robux market', 'Magaza'], ['/robux egg', 'Yumurta'], ['/robux pets', 'Koleksiyon'], ['/robux petbilgi', 'Tek pet detayı'], ['/robux petindex', 'Tum pet katalog'], ['/robux equip', 'Pet kusan'], ['/robux envanter', 'Esyalar'], ['/robux liderler', 'Top 10'], ['/robux bilgi', 'Rehber']],
+  ekonomi: [['/robux bakiye', 'Detayli profil'], ['/robux cash', 'Transfer'], ['/robux gunluk', 'Gunluk + streak + faiz'], ['/robux calis', 'Is'], ['/robux ara', 'Arama'], ['/robux maden', 'Maden kazisi'], ['/robux balik', 'Balik avi'], ['/robux soygun', 'Uye soygun (riskli)'], ['/robux yazitura', 'Coinflip'], ['/robux bahis', 'Zar'], ['/robux duel', 'Duello'], ['/robux trade', 'PET/ESYA/NAKIT trade'], ['/robux yatir / cek', 'Banka'], ['/robux market', 'Magaza'], ['/robux egg', 'Yumurta'], ['/robux pets', 'Koleksiyon'], ['/robux petbilgi', 'Tek pet detayi'], ['/robux petindex', 'Tum pet katalog'], ['/robux equip', 'Pet kusan'], ['/robux envanter', 'Esyalar'], ['/robux liderler', 'Top 10'], ['/robux bilgi', 'Rehber']],
   genel: [['/yardim', 'Menu (DM)'], ['/ping', 'Gecikme'], ['/avatar', 'Avatar'], ['/sunucu-bilgi', 'Sunucu'], ['/uye-bilgi', 'Uye'], ['/user-count', 'Sayac']],
   owner: [['/owner', 'OWNER PANEL (sadece owner, gizli): admin ekle/cikar, pet ver, bakiye ayarla, esya ver, sifirla, global mesaj'], ['/admin', 'BOT ADMIN PANEL: pet ver, bakiye ayarla, esya ver, bakiye gor']]
 };
@@ -810,7 +808,7 @@ async function updateUC(guild) {
   if (c2.name !== n2) await c2.setName(n2).catch(() => {});
 }
 
-/* ===================== ROBUX (v3 SUPER EKONOMI) ===================== */
+/* ===================== ROBUX ===================== */
 CMDS.push({
   data: new SlashCommandBuilder().setName('robux').setDescription('Robux ekonomi sistemi')
     .addSubcommand(s => s.setName('bakiye').setDescription('Detayli profil').addUserOption(o => o.setName('uye').setDescription('Uye')))
@@ -824,14 +822,14 @@ CMDS.push({
     .addSubcommand(s => s.setName('yazitura').setDescription('Coinflip').addStringOption(o => o.setName('tahmin').setDescription('Tahmin').setRequired(true).addChoices({ name: 'Yazi', value: 'yazi' }, { name: 'Tura', value: 'tura' })).addIntegerOption(o => o.setName('miktar').setDescription('Bahis').setRequired(true).setMinValue(1)))
     .addSubcommand(s => s.setName('bahis').setDescription('Zar').addIntegerOption(o => o.setName('miktar').setDescription('Bahis').setRequired(true).setMinValue(1)))
     .addSubcommand(s => s.setName('duel').setDescription('Duello').addUserOption(o => o.setName('uye').setDescription('Rakip').setRequired(true)).addIntegerOption(o => o.setName('miktar').setDescription('Bahis').setRequired(true).setMinValue(1)))
-    .addSubcommand(s => s.setName('trade').setDescription('Trade baslat').addUserOption(o => o.setName('uye').setDescription('Trade ortaği').setRequired(true)))
+    .addSubcommand(s => s.setName('trade').setDescription('Trade baslat').addUserOption(o => o.setName('uye').setDescription('Trade ortagi').setRequired(true)))
     .addSubcommand(s => s.setName('yatir').setDescription('Yatir').addIntegerOption(o => o.setName('miktar').setDescription('Miktar').setRequired(true).setMinValue(1)))
     .addSubcommand(s => s.setName('cek').setDescription('Cek').addIntegerOption(o => o.setName('miktar').setDescription('Miktar').setRequired(true).setMinValue(1)))
     .addSubcommand(s => s.setName('market').setDescription('Magaza'))
     .addSubcommand(s => s.setName('envanter').setDescription('Esyalar'))
     .addSubcommand(s => s.setName('egg').setDescription('Yumurta ac').addStringOption(o => o.setName('tur').setDescription('Tur').setRequired(true).addChoices({ name: 'Normal (500)', value: 'egg_normal' }, { name: 'Premium (2500)', value: 'egg_premium' }, { name: 'Mystic (15000)', value: 'egg_mystic' })))
     .addSubcommand(s => s.setName('pets').setDescription('Koleksiyon').addUserOption(o => o.setName('uye').setDescription('Uye')))
-    .addSubcommand(s => s.setName('petbilgi').setDescription('Tek pet detayı').addStringOption(o => o.setName('id').setDescription('Pet ID').setRequired(true)))
+    .addSubcommand(s => s.setName('petbilgi').setDescription('Tek pet detayi').addStringOption(o => o.setName('id').setDescription('Pet ID').setRequired(true)))
     .addSubcommand(s => s.setName('petindex').setDescription('Tum pet katalog + oranlar'))
     .addSubcommand(s => s.setName('equip').setDescription('Pet kusan/ac').addStringOption(o => o.setName('id').setDescription('Pet ID').setRequired(true)))
     .addSubcommand(s => s.setName('liderler').setDescription('Top 10'))
@@ -897,7 +895,7 @@ CMDS.push({
       const fishes = [['Hamsi', 20, 60], ['Levrek', 60, 150], ['Somon', 150, 350], ['Kilic Baligi', 350, 800], ['Altin Balik', 800, 2000]];
       const r = Math.random(); let f;
       if (r < 0.05) f = null; else f = fishes[Math.min(fishes.length - 1, Math.floor(Math.pow(r, 1.6) * fishes.length))];
-      if (!f) return i.reply({ embeds: [ERR('Cizme takildi, balik kacdi.')] });
+      if (!f) return i.reply({ embeds: [ERR('Cizme takildi, balik kacti.')] });
       const kaz = Math.floor(rnd(f[1], f[2]) * boostMul(i.user));
       u.balance += kaz; addXP(i.user.id, 10);
       return i.reply({ embeds: [OKC(`**${f[0]}** yakaladin: ${balF(kaz)}`)] });
@@ -905,14 +903,14 @@ CMDS.push({
     if (sub === 'soygun') {
       const t = i.options.getMember('uye');
       if (!t || t.user.bot || t.id === i.user.id) return i.reply({ embeds: [ERR('Gecersiz hedef.')], ephemeral: true });
-      if (isOwner(t.user)) return i.reply({ embeds: [ERR('Owner soyulamaz.')] , ephemeral: true });
+      if (isOwner(t.user)) return i.reply({ embeds: [ERR('Owner soyulamaz.')], ephemeral: true });
       if (u.cd.heist > now()) return i.reply({ embeds: [ERR(`Kalan: **${fmtDur(u.cd.heist - now())}**`)], ephemeral: true });
       u.cd.heist = now() + 7200000;
       const tu = uconf(t.id);
       const chance = 0.45 + Math.min(u.level * 0.005, 0.15);
       if (Math.random() < chance) {
         const steal = Math.min(Math.floor(tu.balance * rnd(10, 30) / 100), 10000);
-        if (steal < 1) return i.reply({ embeds: [ERR('Hedefin cuzdani bos, ele gecen bir sey yok.')] });
+        if (steal < 1) return i.reply({ embeds: [ERR('Hedefin cuzdani bos.')] });
         tu.balance -= steal; u.balance += steal; addXP(i.user.id, 25);
         return i.reply({ embeds: [OKC(`Soygun BASARILI! ${t.user.tag} uyesinden ${balF(steal)} calindi.`)] });
       } else {
@@ -953,7 +951,7 @@ CMDS.push({
     }
     if (sub === 'trade') {
       const t2 = i.options.getMember('uye');
-      if (!t2 || t2.user.bot || t2.id === i.user.id) return i.reply({ embeds: [ERR('Gecersiz trade ortaği.')], ephemeral: true });
+      if (!t2 || t2.user.bot || t2.id === i.user.id) return i.reply({ embeds: [ERR('Gecersiz trade ortagi.')], ephemeral: true });
       const id = rnd(100000, 999999);
       const t = { id, gid: i.guild.id, cid: i.channel.id, from: i.user.id, to: t2.id, fromOffer: { cash: 0, pets: [], items: [] }, toOffer: { cash: 0, pets: [], items: [] }, conf: { from: false, to: false }, exp: now() + 300000 };
       STATE.set('trade:' + id, t);
@@ -961,7 +959,7 @@ CMDS.push({
       t.mid = msg.id;
       return;
     }
-    if (sub === 'yatir') { const m = i.options.getInteger('miktar'); if (u.balance < m) return i.reply({ embeds: [ERR('Yetersiz.')], ephemeral: true }); u.balance -= m; u.bank += m; return i.reply({ embeds: [OKC(`Bankaya ${balF(m)} (gunluk %2 faiz kazanir).`)] }); }
+    if (sub === 'yatir') { const m = i.options.getInteger('miktar'); if (u.balance < m) return i.reply({ embeds: [ERR('Yetersiz.')], ephemeral: true }); u.balance -= m; u.bank += m; return i.reply({ embeds: [OKC(`Bankaya ${balF(m)} (gunluk %2 faiz).`)] }); }
     if (sub === 'cek') { const m = i.options.getInteger('miktar'); if (u.bank < m) return i.reply({ embeds: [ERR('Bankada yeterli yok.')], ephemeral: true }); u.bank -= m; u.balance += m; return i.reply({ embeds: [OKC(`${balF(m)} cekildi.`)] }); }
     if (sub === 'market') {
       const rows = [];
@@ -993,7 +991,7 @@ CMDS.push({
     if (sub === 'petbilgi') {
       const pid = i.options.getString('id');
       const pet = u.pets.find(p => p.id === pid);
-      if (!pet) return i.reply({ embeds: [ERR('Bu ID sende kayitli degil. `/robux pets` ile ID\'leri gor.')] , ephemeral: true });
+      if (!pet) return i.reply({ embeds: [ERR('Bu ID sende kayitli degil. `/robux pets` ile IDleri gor.')], ephemeral: true });
       const R = RARITIES[pet.rarity];
       return i.reply({ embeds: [E(R.color).setTitle(`PET BILGISI: ${pet.emoji} ${pet.name}`).setDescription(
         `**Nadirlik:** ${R.label}\n**Boost:** +${pet.boost} R$ / kazanc\n**Tahmini deger:** ${balF(R.value)}\n**Durum:** ${pet.equipped ? 'KUSANILMIS' : 'Bosta'}\n**Alindigi tarih:** <t:${Math.floor(pet.obtained / 1000)}:f>\n**ID:** \`${pet.id}\``)] });
@@ -1019,7 +1017,7 @@ CMDS.push({
       const top = Object.entries(DB.users).sort((a, b) => (b[1].balance + b[1].bank) - (a[1].balance + a[1].bank)).slice(0, 10);
       return i.reply({ embeds: [E(0xFEE75C).setTitle('ROBUX LIDERLERI').setDescription(top.map((t, x) => `**${x + 1}.** <@${t[0]}> — ${balF(t[1].balance + t[1].bank)}`).join('\n') || '> Veri yok.')] });
     }
-    if (sub === 'bilgi') return i.reply({ embeds: [E(0x57F287).setTitle('ROBUX EKONOMI REHBERI').setDescription('> **Kazanma:** gunluk (streak+faiz), calis, ara, maden, balik, soygun\n**Oyunlar:** yazitura, bahis, duel\n**Pet:** egg → pets → petbilgi → petindex → equip (max 3, boost verir)\n**Trade:** `/robux trade @uye` → nakit/pet/esya takas\n**Banka:** yatir/cek → gunluk %2 faiz\n**Seviye:** her islem XP verir') ] });
+    if (sub === 'bilgi') return i.reply({ embeds: [E(0x57F287).setTitle('ROBUX EKONOMI REHBERI').setDescription('> **Kazanma:** gunluk (streak+faiz), calis, ara, maden, balik, soygun\n**Oyunlar:** yazitura, bahis, duel\n**Pet:** egg → pets → petbilgi → petindex → equip (max 3, boost verir)\n**Trade:** `/robux trade @uye` → nakit/pet/esya takas\n**Banka:** yatir/cek → gunluk %2 faiz\n**Seviye:** her islem XP verir')] });
   }
 });
 
