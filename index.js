@@ -1,18 +1,13 @@
-/* ========= NETWORK FIX (Render + yeni Node gateway donması) ========= */
 require('net').setDefaultAutoSelectFamily(false);
-try { require('net').setDefaultAutoSelectFamilyAttemptTimeout(200); } catch (e) {}
-try {
-  const { setGlobalDispatcher, Agent } = require('undici');
-  setGlobalDispatcher(new Agent({ connect: { autoSelectFamily: false }, headersTimeout: 30000, bodyTimeout: 30000 }));
-} catch (e) { console.error('[NET] undici dispatcher ayarlanamadi:', e.message); }
 /* ============================================================
-   STUDIOBLOX v1.0.0 - PROFESYONEL DISCORD BOTU (TEK DOSYA)
-   Secret'lar environment'tan okunur, GitHub'a token YAZMA.
+   STUDIOBLOX v1.1.0 - PROFESYONEL DISCORD BOTU (TEK DOSYA)
+   v1.1: modal sistemi kaldirildi (showModal hatasi cozumu),
+   dm-at kullanici adi destegi, ticket/duyuru markdown duzeltmeleri.
    ============================================================ */
 const {
   Client, GatewayIntentBits, EmbedBuilder, ActionRowBuilder, ButtonBuilder,
   ButtonStyle, StringSelectMenuBuilder, ChannelSelectMenuBuilder, RoleSelectMenuBuilder,
-  ModalBuilder, TextInputBuilder, TextInputStyle, ChannelType, PermissionFlagsBits,
+  ChannelType, PermissionFlagsBits,
   Partials, AttachmentBuilder, SlashCommandBuilder
 } = require('discord.js');
 const fs = require('fs');
@@ -22,7 +17,7 @@ const CONFIG = {
   token: process.env.TOKEN || "",
   ownerId: process.env.OWNER_ID || "",
   mequeenBanner: process.env.MEQUEEN_BANNER || "",
-  version: "1.0.0"
+  version: "1.1.0"
 };
 if (!CONFIG.token) { console.error('[HATA] Render Environment icinde TOKEN yok!'); process.exit(1); }
 
@@ -37,7 +32,7 @@ const client = new Client({
   partials: [Partials.Channel, Partials.Message, Partials.User, Partials.GuildMember]
 });
 
-/* ========================= VERİTABANI (OTOMATİK) ========================= */
+/* ========================= VERİTABANI ========================= */
 const DB_PATH = './database.json';
 const emptyDB = () => ({ guilds: {}, users: {}, giveaways: {}, tickets: {}, apps: {} });
 let DB = emptyDB();
@@ -114,6 +109,25 @@ async function modlog(guild, embed) {
 function adminCheck(i) { return isOwner(i.user) || (i.member && i.member.permissions.has(PermissionFlagsBits.Administrator)); }
 function modCheck(i) { return isOwner(i.user) || (i.member && (i.member.permissions.has(PermissionFlagsBits.ModerateMembers) || i.member.permissions.has(PermissionFlagsBits.Administrator))); }
 
+/* Panel yenileme yardimcisi (update/editReply fark etmez) */
+async function refresh(i, payload) {
+  try {
+    if (i.deferred || i.replied) return await i.editReply(payload);
+    return await i.update(payload);
+  } catch (e) {
+    try { return await i.followUp(payload); } catch (e2) {}
+  }
+}
+/* Kanaldan tek mesajlik yazi toplar (modal yerine) */
+async function collectChannel(i, prompt, timeout = 180000) {
+  try { await i.followUp({ embeds: [E().setDescription(prompt + '\n-# Cevabini bu kanala yaz, 3 dk icinde.')], ephemeral: true }); }
+  catch (e) { try { await i.reply({ embeds: [E().setDescription(prompt + '\n-# Cevabini bu kanala yaz, 3 dk icinde.')], ephemeral: true }); } catch (e2) {} }
+  const got = await i.channel.awaitMessages({ filter: m => m.author.id === i.user.id, max: 1, time: timeout }).catch(() => null);
+  if (!got || !got.size) return null;
+  got.first().delete().catch(() => {});
+  return got.first().content.trim();
+}
+
 const STATE = new Map();
 const sKey = (i, extra = '') => `${i.guild ? i.guild.id : 'dm'}:${i.user.id}${extra}`;
 setInterval(() => { for (const [k, v] of STATE) if (v.exp && v.exp < now()) STATE.delete(k); }, 300000);
@@ -123,16 +137,16 @@ const KUFUR = ['amk', 'aq', 'amq', 'orospu', 'piç', 'pic', 'sik', 'sikim', 'sik
 const KUFUR_RX = new RegExp(`\\b(${KUFUR.join('|')})\\b`, 'i');
 const REKLAM_RX = /(discord\.gg|discord\.me|discord\.io|discordapp\.com\/invite|discord\.com\/invite)/i;
 
-/* ========================= MEQUEEN HAZIR İÇERİK ========================= */
+/* ========================= MEQUEEN HAZIR İÇERİK (MARKDOWN DÜZELTİLMİŞ) ========================= */
 const MEQUEEN_TEXT = `**Sunucu Destek**
 
-> **Aşşağıdaki ticket kurallarını okuduktan sonra ticket kategorisinden kategori seçerek ticket açabilirsiniz kuralları okudunuz sayılacaktır.
+> Aşağıdaki ticket kurallarını okuduktan sonra ticket kategorisinden kategori seçerek ticket açabilirsiniz. Kuralları okudunuz sayılacaktır.
 
-*Yanlış sebep açmak yasaktır
-*Açtıktan sonra maximum tag sınırı **2**'dir
-*Troll, Test amaçlı ticket açmak yasaktır.
+- Yanlış sebep ile ticket açmak yasaktır.
+- Açtıktan sonra maksimum tag sınırı **2**'dir.
+- Troll veya test amaçlı ticket açmak yasaktır.
 
-Kategoriler: Bug Bildir, Şikayet, Yetkili Alım, Diğer`;
+**Kategoriler:** \`Bug Bildir\` • \`Şikayet\` • \`Yetkili Alım\` • \`Diğer\``;
 const MEQUEEN_CATS = ['Bug Bildir', 'Şikayet', 'Yetkili Alım', 'Diğer'];
 
 /* ========================= EKONOMİ ========================= */
@@ -157,9 +171,9 @@ CMDS.push({
   data: new SlashCommandBuilder().setName('ticket-kur').setDescription('🛠️ Kategori seçmeli gelişmiş ticket sistemi kurar').setDMPermission(false),
   async execute(i) {
     if (!adminCheck(i)) return i.reply({ embeds: [ERR('Bu komutu kullanmak için **Yönetici** olmalısın.')], ephemeral: true });
-    STATE.set(sKey(i) + ':tk', { exp: now() + 600000 });
+    STATE.set(sKey(i) + ':tk', { exp: now() + 900000 });
     await i.reply({
-      embeds: [E().setTitle('🛠️ Ticket Sistemi Kurulumu').setDescription('**Kurulum adımları:**\n`1.` Kurulum tipini seç (Kategorili / Kategorisiz)\n`2.` Panel kanalı + etiketlenecek rolleri seç\n`3.` Modal üzerinden görsel & mesaj ayarla\n`4.` Panel otomatik oluşturulsun\n\n> Aşağıdaki butonlardan birini seçerek başla.')],
+      embeds: [E().setTitle('🛠️ Ticket Sistemi Kurulumu').setDescription('**Kurulum adımları:**\n`1.` Kurulum tipini seç (Kategorili / Kategorisiz)\n`2.` Panel kanalı + etiketlenecek rolleri seç\n`3.` **Devam** deyince istenen bilgileri kanala yaz\n`4.` Panel otomatik oluşturulsun')],
       components: [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('tk:mode:kategorili').setLabel('Kategorili Kur').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('tk:mode:kategorisiz').setLabel('Kategorisiz Kur').setStyle(ButtonStyle.Secondary))],
@@ -172,7 +186,7 @@ CMDS.push({
   data: new SlashCommandBuilder().setName('ticket-kur-mequeen').setDescription('🛠️ Mequeen Studio hazır ticket paneli kurar').setDMPermission(false),
   async execute(i) {
     if (!adminCheck(i)) return i.reply({ embeds: [ERR('Bu komutu kullanmak için **Yönetici** olmalısın.')], ephemeral: true });
-    STATE.set(sKey(i) + ':mq', { exp: now() + 600000 });
+    STATE.set(sKey(i) + ':mq', { exp: now() + 900000 });
     await i.reply({
       embeds: [E().setTitle('🛠️ Mequeen Studio Ticket Kurulumu').setDescription('> Hazır şablon: **Mequeen Studio Destek & Support**\n\n`1.` Panelin atılacağı kanalı seç\n`2.` Ticket açılınca etiketlenecek rolleri seç (isteğe bağlı)\n`3.` **Paneli Kur** butonuna bas\n\nKategoriler: `Bug Bildir` `Şikayet` `Yetkili Alım` `Diğer`')],
       components: [
@@ -382,20 +396,30 @@ CMDS.push({
   }
 });
 
-/* ---------- DUYURULAR ---------- */
+/* ---------- DUYURULAR (modal YOK, kanala yazmalı) ---------- */
 function duyuruCmd(name, desc, type) {
   CMDS.push({
     data: new SlashCommandBuilder().setName(name).setDescription(desc).setDMPermission(false),
     async execute(i) {
       if (!modCheck(i)) return i.reply({ embeds: [ERR('Yetkin yok: **Mesajları Yönet**.')], ephemeral: true });
-      const modal = new ModalBuilder().setCustomId(`ann:modal:${type}`).setTitle(type === 'guncelleme' ? '✨ Güncelleme Duyurusu' : '👀 Leak Duyurusu');
-      modal.addComponents(
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('baslik').setLabel('Başlık').setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('icerik').setLabel('İçerik (markdown serbest)').setStyle(TextInputStyle.Paragraph).setMaxLength(3500).setRequired(true)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('thumb').setLabel('Thumbnail URL (opsiyonel)').setStyle(TextInputStyle.Short).setRequired(false)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('image').setLabel('Büyük görsel URL (opsiyonel)').setStyle(TextInputStyle.Short).setRequired(false)),
-        new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('renk').setLabel('Renk hex (opsiyonel, örn: 5865F2)').setStyle(TextInputStyle.Short).setRequired(false)));
-      await i.showModal(modal);
+      await i.deferReply({ ephemeral: true });
+      const baslik = await collectChannel(i, `> **1/5 BAŞLIK** — ${type === 'leak' ? 'Leak duyurusu' : 'Güncelleme duyurusu'} başlığını yaz:`);
+      if (!baslik) return i.editReply({ embeds: [ERR('Süre doldu, duyuru iptal.')], components: [] });
+      const icerik = await collectChannel(i, '> **2/5 İÇERİK** — Duyuru metnini yaz (markdown serbest):');
+      if (!icerik) return i.editReply({ embeds: [ERR('Süre doldu, duyuru iptal.')], components: [] });
+      const thumb = await collectChannel(i, '> **3/5 THUMBNAIL** — Küçük görsel URL yaz (yoksa `-`):');
+      if (thumb === null) return i.editReply({ embeds: [ERR('Süre doldu, duyuru iptal.')], components: [] });
+      const image = await collectChannel(i, '> **4/5 BÜYÜK GÖRSEL** — URL yaz (yoksa `-`):');
+      if (image === null) return i.editReply({ embeds: [ERR('Süre doldu, duyuru iptal.')], components: [] });
+      const renk = await collectChannel(i, '> **5/5 RENK** — Hex kod yaz (örn: `5865F2`, yoksa `-`):');
+      if (renk === null) return i.editReply({ embeds: [ERR('Süre doldu, duyuru iptal.')], components: [] });
+      const st = {
+        exp: now() + 600000, type, baslik, icerik,
+        thumb: thumb === '-' ? null : thumb, image: image === '-' ? null : image,
+        renk: renk === '-' ? null : renk, kanal: i.channel.id, mention: 'yok', rol: null
+      };
+      STATE.set(sKey(i) + ':ann', st);
+      return annPreview(i);
     }
   });
 }
@@ -403,7 +427,7 @@ duyuruCmd('güncelleme-duyuru', '📢 Profesyonel güncelleme duyurusu', 'guncel
 duyuruCmd('leak-duyuru', '📢 Profesyonel leak duyurusu', 'leak');
 
 function annEmbed(a, user) {
-  const color = a.renk ? parseInt(a.renk.replace('#', ''), 16) || (a.type === 'leak' ? 0xED4245 : 0x57F287) : (a.type === 'leak' ? 0xED4245 : 0x57F287);
+  const color = a.renk ? parseInt(String(a.renk).replace('#', ''), 16) || (a.type === 'leak' ? 0xED4245 : 0x57F287) : (a.type === 'leak' ? 0xED4245 : 0x57F287);
   const eb = E(color);
   if (a.type === 'leak') eb.setDescription(`**👀 LEAK / SIZINTI BÜLTENİ**\n> **${a.baslik}**\n> *Kaynak doğrulanmamıştır; paylaşım sorumluluğu kullanıcıya aittir.*\n\n${a.icerik}`);
   else eb.setDescription(`**✨ GÜNCELLEME DUYURUSU**\n> **${a.baslik}**\n\n${a.icerik}`);
@@ -411,6 +435,18 @@ function annEmbed(a, user) {
   if (a.image) eb.setImage(a.image);
   eb.setFooter({ text: `Duyuruyu hazırlayan: ${user.tag} • Studioblox` });
   return eb;
+}
+async function annPreview(i) {
+  const st = STATE.get(sKey(i) + ':ann');
+  if (!st) return;
+  const rows = [
+    new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('ann:kanal').setPlaceholder('Hedef kanal (boşsa mevcut)').setChannelTypes([ChannelType.GuildText])),
+    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('ann:mention').setPlaceholder('Etiket seç...').addOptions({ label: 'Etiket Yok', value: 'yok' }, { label: '@everyone', value: 'everyone' }, { label: '@here', value: 'here' }, { label: 'Rol', value: 'rol' })),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('ann:gonder').setLabel('Duyuruyu Gönder 📢').setStyle(ButtonStyle.Success),
+      new ButtonBuilder().setCustomId('ann:iptal').setLabel('İptal').setStyle(ButtonStyle.Danger))
+  ];
+  return refresh(i, { embeds: [annEmbed(st, i.user).setTitle('ÖNİZLEME')], components: rows });
 }
 
 /* ---------- ÇEKİLİŞ ---------- */
@@ -521,7 +557,7 @@ CMDS.push({
     if (!adminCheck(i)) return i.reply({ embeds: [ERR('Yönetici olmalısın.')], ephemeral: true });
     STATE.set(sKey(i) + ':dm', { exp: now() + 600000, target: null, member: null });
     await i.reply({
-      embeds: [E().setTitle('📢 DM Gönderim Sistemi').setDescription('> Kime gönderileceğini seç:\n`everyone` → tüm üyeler\n`here` → aktif üyeler\n`uye` → tek üye')],
+      embeds: [E().setTitle('📢 DM Gönderim Sistemi').setDescription('> Kime gönderileceğini seç:\n`everyone` → tüm üyeler\n`here` → aktif üyeler\n`uye` → ID / mention / **Discord kullanıcı adı**')],
       components: [new ActionRowBuilder().addComponents(
         new ButtonBuilder().setCustomId('dm:target:everyone').setLabel('Everyone').setStyle(ButtonStyle.Primary),
         new ButtonBuilder().setCustomId('dm:target:here').setLabel('Here (Online)').setStyle(ButtonStyle.Secondary),
@@ -537,8 +573,8 @@ const CATS = {
   ticket: [['/ticket-kur', 'Kategorili/kategorisiz ticket paneli'], ['/ticket-kur-mequeen', 'Mequeen hazır panel'], ['Panel menüsü', 'Kategori seçerek ticket açma'], ['Ticket butonları', 'Kapat + otomatik transcript']],
   duyuru: [['/güncelleme-duyuru', 'Markdown destekli duyuru'], ['/leak-duyuru', 'Sızıntı bülteni'], ['Önizleme', 'Kanal/mention seçimli önizleme']],
   cekilis: [['/çekiliş başlat', 'Süre, ödül, tür, rol şartı, ping'], ['/çekiliş bitir', 'Erken bitir'], ['/çekiliş yeniden', 'Reroll'], ['Otomatik', '6 saat & 1 saat kala ping']],
-  basvuru: [['/başvuru-sistemi', 'Panel + log + sorular + kabul rolü'], ['Log butonları', 'Gör / Kabul / Reddet / Beklemeye Al'], ['DM bildirim', 'Ret sebebi DM ile gider']],
-  dm: [['/dm-at', 'Everyone / Here / Tek üye DM']],
+  basvuru: [['/başvuru-sistemi', 'Panel + log + sorular + kabul rolü'], ['Log butonları', 'Gör / Kabul / Reddet / Beklemeye Al'], ['DM bildirim', 'Ret sebebi DM ile gider'], ['Form', 'DM üzerinden doldurulur']],
+  dm: [['/dm-at', 'Everyone / Here / Tek üye (ID veya kullanıcı adı)']],
   ekonomi: [['/robux bakiye', 'Cüzdan + banka'], ['/robux cash', 'Transfer'], ['/robux günlük', 'Günlük R$'], ['/robux çalış', 'İş kazancı'], ['/robux ara', 'Rastgele R$'], ['/robux yazıtura', 'Coinflip'], ['/robux bahis', 'Zar x2/x10'], ['/robux duel', 'Üye düellosu'], ['/robux yatır / çek', 'Banka'], ['/robux market', 'Mağaza'], ['/robux envanter', 'Eşyalar'], ['/robux liderler', 'Top 10'], ['/robux bilgi', 'Rehber']],
   genel: [['/yardım', 'Bu menü (DM)'], ['/ping', 'Gecikme'], ['/avatar', 'Profil fotoğrafı'], ['/sunucu-bilgi', 'Sunucu istatistiği'], ['/üye-bilgi', 'Üye kartı'], ['/user-count', 'Kilitli sayaç kanalları']]
 };
@@ -774,6 +810,49 @@ async function closeTicket(i) {
   saveDB();
   await i.channel.delete('Ticket kapatıldı').catch(() => {});
 }
+async function finalizeTicket(i, st, cats) {
+  const ch = i.guild.channels.cache.get(st.kanal);
+  if (!ch) return refresh(i, { embeds: [ERR('Kanal bulunamadı.')], components: [] });
+  gconf(i.guild.id).ticket = { mode: st.mode, channel: st.kanal, roles: st.roller || [], thumb: st.thumb, text: st.metin, cats, categoryId: null };
+  const eb = E().setTitle('🛠️ HELP & SUPPORT').setDescription(st.metin);
+  if (st.thumb && st.thumb.startsWith('http')) eb.setThumbnail(st.thumb);
+  const comps = [];
+  if (st.mode === 'kategorili' && cats.length) comps.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('tk:secim').setPlaceholder('Ticket kategorisi seç...').addOptions(cats.map(c => ({ label: c, value: c })))));
+  else comps.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('tkpanel:create').setLabel('Ticket Oluştur').setStyle(ButtonStyle.Primary)));
+  await ch.send({ embeds: [eb], components: comps });
+  STATE.delete(sKey(i) + ':tk');
+  return refresh(i, { embeds: [OKC(`Ticket paneli kuruldu: ${ch}`)], components: [] });
+}
+
+/* ========================= BAŞVURU YARDIMCILARI ========================= */
+function appLogEmbed(a) {
+  const renk = a.status === 'KABUL' ? 0x57F287 : a.status === 'RED' ? 0xED4245 : a.status === 'İNCELEMEDE' ? 0xFEE75C : 0x5865F2;
+  return E(renk).setTitle(`📋 YENİ BAŞVURU #${a.id}`).setDescription(`**Başvuran:** <@${a.user}> (${a.user})\n**Tarih:** <t:${Math.floor(a.time / 1000)}:f>\n**Durum:** \`${a.status}\`\n**Soru sayısı:** ${a.qa.length}\n\n> İçeriği görmek için **Başvuruyu Gör** (yalnızca yönetici 🔑)`);
+}
+async function appLogUpdate(i, a) {
+  try { await i.message.edit({ embeds: [appLogEmbed(a)], components: [i.message.components[0]] }); } catch (e) {}
+  saveDB();
+}
+async function appSetupUpdate(i) {
+  const st = STATE.get(sKey(i) + ':app');
+  const rows = [
+    new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('app:kanal').setPlaceholder('Panel kanalı').setChannelTypes([ChannelType.GuildText])),
+    new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('app:log').setPlaceholder('Log kanalı').setChannelTypes([ChannelType.GuildText])),
+    new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('app:rol').setPlaceholder('Kabul rolü (opsiyonel)').setMinValues(0).setMaxValues(1)),
+    new ActionRowBuilder().addComponents(
+      new ButtonBuilder().setCustomId('app:metin').setLabel('Panel Metni').setStyle(ButtonStyle.Primary),
+      new ButtonBuilder().setCustomId('app:addsoru').setLabel('Soru Ekle').setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder().setCustomId('app:kur').setLabel('Sistemi Kur').setStyle(ButtonStyle.Success))
+  ];
+  if (st.sorular.length) {
+    const btns = st.sorular.map((s, x) => new ButtonBuilder().setCustomId(`app:sorusil:${x}`).setLabel(`✕ ${x + 1}. ${s.slice(0, 20)}`).setStyle(ButtonStyle.Danger));
+    for (let x = 0; x < btns.length; x += 5) rows.push(new ActionRowBuilder().addComponents(btns.slice(x, x + 5)));
+  }
+  return refresh(i, {
+    embeds: [E().setTitle('📋 Başvuru Kurulum').setDescription(`**Panel:** ${st.kanal ? `<#${st.kanal}>` : '❌'}\n**Log:** ${st.log ? `<#${st.log}>` : '❌'}\n**Kabul rolü:** ${st.rol ? `<@&${st.rol}>` : '—'}\n**Metin:** ${st.metin ? '✅' : '❌'}\n**Sorular (${st.sorular.length}):**\n${st.sorular.map((s, x) => `> \`{${x + 1}}\` ${s}`).join('\n') || '> yok'}`)],
+    components: rows
+  });
+}
 
 /* ========================= ETKİLEŞİM ========================= */
 client.on('interactionCreate', async (i) => {
@@ -785,12 +864,12 @@ client.on('interactionCreate', async (i) => {
     }
     if (i.isButton()) {
       const id = i.customId;
-      if (id === 'tk:iptal') { STATE.delete(sKey(i) + ':tk'); STATE.delete(sKey(i) + ':mq'); return i.update({ embeds: [ERR('Kurulum iptal edildi.')], components: [] }); }
+      if (id === 'tk:iptal') { STATE.delete(sKey(i) + ':tk'); STATE.delete(sKey(i) + ':mq'); return refresh(i, { embeds: [ERR('Kurulum iptal edildi.')], components: [] }); }
       if (id.startsWith('tk:mode:')) {
         const st = STATE.get(sKey(i) + ':tk') || {};
-        st.mode = id.split(':')[2]; st.exp = now() + 600000;
+        st.mode = id.split(':')[2]; st.exp = now() + 900000;
         STATE.set(sKey(i) + ':tk', st);
-        return i.update({
+        return refresh(i, {
           embeds: [E().setTitle('🛠️ Ticket Kurulum — Adım 2').setDescription(`Tip: **${st.mode === 'kategorili' ? 'Kategorili' : 'Kategorisiz'}**\n> Panel kanalı ve rolleri seç, sonra **Devam**.`)],
           components: [
             new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('tk:kanal').setPlaceholder('Panel kanalı').setChannelTypes([ChannelType.GuildText])),
@@ -802,12 +881,21 @@ client.on('interactionCreate', async (i) => {
       }
       if (id === 'tk:devam') {
         const st = STATE.get(sKey(i) + ':tk');
-        if (!st || !st.kanal) return i.update({ embeds: [ERR('Önce panel kanalı seç.')], components: [] });
-        const modal = new ModalBuilder().setCustomId('tk:ayar').setTitle('🛠️ Ticket Panel Ayarları');
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('thumb').setLabel('Thumbnail/Banner URL (opsiyonel)').setStyle(TextInputStyle.Short).setRequired(false)),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('metin').setLabel('Ticket mesajı (panel açıklaması)').setStyle(TextInputStyle.Paragraph).setMaxLength(3000).setRequired(true)));
-        return i.showModal(modal);
+        if (!st || !st.kanal) return refresh(i, { embeds: [ERR('Önce panel kanalı seç.')], components: [] });
+        await i.deferUpdate().catch(() => {});
+        const thumb = await collectChannel(i, '> **1/2 THUMBNAIL** — Panel üstü görsel URL yaz (yoksa `-`):');
+        if (thumb === null) return refresh(i, { embeds: [ERR('Süre doldu, kurulum iptal.')], components: [] });
+        st.thumb = thumb === '-' ? null : thumb;
+        const metin = await collectChannel(i, '> **2/2 PANEL MESAJI** — Ticket panel açıklamasını yaz (markdown serbest):');
+        if (!metin) return refresh(i, { embeds: [ERR('Süre doldu, kurulum iptal.')], components: [] });
+        st.metin = metin;
+        if (st.mode === 'kategorili') {
+          const kats = await collectChannel(i, '> **KATEGORİLER** — Her satıra 1 kategori yaz (max 10):');
+          if (!kats) return refresh(i, { embeds: [ERR('Süre doldu, kurulum iptal.')], components: [] });
+          st.cats = kats.split('\n').map(s => s.trim()).filter(Boolean).slice(0, 10);
+        } else st.cats = [];
+        STATE.set(sKey(i) + ':tk', st);
+        return finalizeTicket(i, st, st.cats || []);
       }
       if (id === 'tkpanel:create') return createTicket(i, 'Genel Destek');
       if (id === 'tk:kapat') return i.reply({
@@ -821,14 +909,14 @@ client.on('interactionCreate', async (i) => {
       if (id === 'tk:kapat:onay') { await i.update({ embeds: [OKC('Ticket kapatılıyor... 📎')], components: [] }); return closeTicket(i); }
       if (id === 'mq:kur') {
         const st = STATE.get(sKey(i) + ':mq');
-        if (!st || !st.kanal) return i.update({ embeds: [ERR('Önce panel kanalı seç.')], components: [] });
+        if (!st || !st.kanal) return refresh(i, { embeds: [ERR('Önce panel kanalı seç.')], components: [] });
         const ch = i.guild.channels.cache.get(st.kanal);
         gconf(i.guild.id).ticket = { mode: 'kategorili', channel: st.kanal, roles: st.roller || [], thumb: CONFIG.mequeenBanner, text: MEQUEEN_TEXT, cats: MEQUEEN_CATS, categoryId: null };
         const eb = E().setTitle('🛠️ MEQUEEN STUDIO — HELP & SUPPORT').setDescription(MEQUEEN_TEXT);
         if (CONFIG.mequeenBanner && CONFIG.mequeenBanner.startsWith('http')) eb.setThumbnail(CONFIG.mequeenBanner);
         await ch.send({ embeds: [eb], components: [new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('tk:secim').setPlaceholder('Ticket kategorisi seç...').addOptions(MEQUEEN_CATS.map(c => ({ label: c, value: c }))))] });
         STATE.delete(sKey(i) + ':mq');
-        return i.update({ embeds: [OKC(`Mequeen ticket paneli kuruldu: ${ch}`)], components: [] });
+        return refresh(i, { embeds: [OKC(`Mequeen ticket paneli kuruldu: ${ch}`)], components: [] });
       }
       if (id === 'ann:gonder') {
         const st = STATE.get(sKey(i) + ':ann');
@@ -859,18 +947,27 @@ client.on('interactionCreate', async (i) => {
         return i.reply({ embeds: [E().setTitle('🎉 Katılımcılar').setDescription(gg.parts.length ? gg.parts.map(p => `<@${p}>`).join('\n') : '> Henüz katılımcı yok.')], ephemeral: true });
       }
       if (id === 'app:metin') {
-        const modal = new ModalBuilder().setCustomId('app:metinmodal').setTitle('📋 Panel Metni');
-        modal.addComponents(
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('baslik').setLabel('Panel başlığı').setStyle(TextInputStyle.Short).setMaxLength(100).setRequired(true)),
-          new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('acik').setLabel('Panel açıklaması (markdown serbest)').setStyle(TextInputStyle.Paragraph).setMaxLength(3000).setRequired(true)));
-        return i.showModal(modal);
+        const st = STATE.get(sKey(i) + ':app');
+        if (!st) return refresh(i, { embeds: [ERR('Oturum yok, komutu tekrar kullan.')], components: [] });
+        await i.deferUpdate().catch(() => {});
+        const baslik = await collectChannel(i, '> **PANEL BAŞLIĞI** — Başvuru paneli başlığını yaz:');
+        if (!baslik) return refresh(i, { embeds: [ERR('Süre doldu.')], components: [] });
+        const acik = await collectChannel(i, '> **PANEL AÇIKLAMASI** — Panel açıklamasını yaz (markdown serbest):');
+        if (!acik) return refresh(i, { embeds: [ERR('Süre doldu.')], components: [] });
+        st.metin = { baslik, acik };
+        STATE.set(sKey(i) + ':app', st);
+        return appSetupUpdate(i);
       }
       if (id === 'app:addsoru') {
         const st = STATE.get(sKey(i) + ':app');
-        if (st && st.sorular.length >= 15) return i.reply({ embeds: [ERR('Max 15 soru.')], ephemeral: true });
-        const modal = new ModalBuilder().setCustomId('app:soru').setTitle('📋 Yeni Soru');
-        modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('soru').setLabel('Soru metni (örn: Discord adın nedir?)').setStyle(TextInputStyle.Short).setMaxLength(45).setRequired(true)));
-        return i.showModal(modal);
+        if (!st) return refresh(i, { embeds: [ERR('Oturum yok.')], components: [] });
+        if (st.sorular.length >= 15) return i.reply({ embeds: [ERR('Max 15 soru.')], ephemeral: true });
+        await i.deferUpdate().catch(() => {});
+        const soru = await collectChannel(i, `> **SORU ${st.sorular.length + 1}** — Soru metnini yaz (örn: Discord adın nedir?):`);
+        if (!soru) return refresh(i, { embeds: [ERR('Süre doldu.')], components: [] });
+        st.sorular.push(soru);
+        STATE.set(sKey(i) + ':app', st);
+        return appSetupUpdate(i);
       }
       if (id.startsWith('app:sorusil:')) {
         const st = STATE.get(sKey(i) + ':app');
@@ -879,18 +976,41 @@ client.on('interactionCreate', async (i) => {
       }
       if (id === 'app:kur') {
         const st = STATE.get(sKey(i) + ':app');
-        if (!st || !st.kanal || !st.log || !st.metin || !st.sorular.length) return i.update({ embeds: [ERR('Eksik: panel kanalı, log kanalı, metin ve en az 1 soru zorunlu.')], components: [] });
+        if (!st || !st.kanal || !st.log || !st.metin || !st.sorular.length) return refresh(i, { embeds: [ERR('Eksik: panel kanalı, log kanalı, metin ve en az 1 soru zorunlu.')], components: [] });
         const ch = i.guild.channels.cache.get(st.kanal);
         gconf(i.guild.id).app = { panel: st.kanal, log: st.log, rol: st.rol || null, metin: st.metin, sorular: st.sorular };
         await ch.send({ embeds: [E().setTitle(`📋 ${st.metin.baslik}`).setDescription(st.metin.acik)], components: [new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('app:apply').setLabel('Başvuru Yap').setStyle(ButtonStyle.Primary))] });
         STATE.delete(sKey(i) + ':app');
-        return i.update({ embeds: [OKC(`Başvuru sistemi kuruldu: ${ch}`)], components: [] });
+        return refresh(i, { embeds: [OKC(`Başvuru sistemi kuruldu: ${ch}`)], components: [] });
       }
       if (id === 'app:apply') {
         const conf = gconf(i.guild.id).app;
         if (!conf) return i.reply({ embeds: [ERR('Sistem kurulu değil.')], ephemeral: true });
-        STATE.set('appfill:' + i.guild.id + ':' + i.user.id, { exp: now() + 600000, answers: [], page: 0 });
-        return appPageModal(i, 0);
+        await i.reply({ embeds: [E().setDescription('> 📋 **Başvuru formu DM\'ine gönderildi.**\nSorulara DM\'den sırayla (her soruya ayrı mesaj) cevap yaz.')], ephemeral: true });
+        const dm = await i.user.createDM();
+        const answers = [];
+        const pages = Math.ceil(conf.sorular.length / 5);
+        for (let p = 0; p < pages; p++) {
+          const qs = conf.sorular.slice(p * 5, p * 5 + 5);
+          await dm.send({ embeds: [E().setTitle(`📋 Başvuru Formu (${p + 1}/${pages})`).setDescription(qs.map((q, x) => `**${p * 5 + x + 1}.** ${q}`).join('\n') + '\n\n> Her soruya **ayrı ayrı** mesaj olarak, sırayla cevap yaz.')] });
+          const got = await dm.awaitMessages({ filter: m => m.author.id === i.user.id, max: qs.length, time: 300000 }).catch(() => null);
+          if (!got || got.size < qs.length) { await dm.send({ embeds: [ERR('Süre doldu, başvuru iptal edildi.')] }).catch(() => {}); return i.editReply({ embeds: [ERR('Süre doldu, başvuru iptal.')], components: [] }); }
+          got.forEach(m => answers.push(m.content));
+        }
+        const aid = rnd(1000, 9999);
+        const qa = conf.sorular.map((q, x) => ({ q, a: answers[x] || '-' }));
+        DB.apps[aid] = { id: aid, guild: i.guild.id, user: i.user.id, qa, status: 'YENİ', time: now() };
+        const logCh = i.guild.channels.cache.get(conf.log);
+        if (logCh) await logCh.send({
+          embeds: [appLogEmbed(DB.apps[aid])],
+          components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId(`app:view:${aid}`).setLabel('👀 Başvuruyu Gör').setStyle(ButtonStyle.Secondary),
+            new ButtonBuilder().setCustomId(`app:accept:${aid}`).setLabel('Kabul Et').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId(`app:reject:${aid}`).setLabel('Reddet').setStyle(ButtonStyle.Danger),
+            new ButtonBuilder().setCustomId(`app:hold:${aid}`).setLabel('Beklemeye Al').setStyle(ButtonStyle.Secondary))]
+        });
+        saveDB();
+        return i.editReply({ embeds: [OKC('Başvurun alındı! 📋 Sonuç DM ile bildirilecek.')], components: [] });
       }
       if (id.startsWith('app:view:')) {
         if (!adminCheck(i)) return i.reply({ embeds: [ERR('Başvuru içeriğini sadece **Yönetici** görür. 🔑')], ephemeral: true });
@@ -912,9 +1032,15 @@ client.on('interactionCreate', async (i) => {
       }
       if (id.startsWith('app:reject:')) {
         if (!adminCheck(i)) return i.reply({ embeds: [ERR('Yetkin yok. 🔑')], ephemeral: true });
-        const modal = new ModalBuilder().setCustomId(`app:rejectmod:${id.split(':')[2]}`).setTitle('📋 Reddetme Açıklaması');
-        modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('sebep').setLabel('Açıklama? (kullanıcıya DM gider)').setStyle(TextInputStyle.Paragraph).setMaxLength(500).setRequired(true)));
-        return i.showModal(modal);
+        await i.deferUpdate().catch(() => {});
+        const sebep = await collectChannel(i, '> **REDDETME AÇIKLAMASI** — Kullanıcıya DM gidecek sebebi yaz:');
+        if (!sebep) return refresh(i, { embeds: [ERR('Süre doldu.')], components: [] });
+        const a = DB.apps[id.split(':')[2]];
+        if (!a) return refresh(i, { embeds: [ERR('Bulunamadı.')], components: [] });
+        a.status = 'RED';
+        dmUser(await client.users.fetch(a.user), E(0xED4245).setDescription(`> **📋 BAŞVURU SONUCU**\n**${i.guild.name}** adlı sunucuda başvurunuz **reddedildi**.\n> Reddedilme sebebi: ${sebep}`));
+        await appLogUpdate(i, a);
+        return refresh(i, { embeds: [OKC('Başvuru reddedildi, kullanıcıya sebepli DM atıldı.')], components: [] });
       }
       if (id.startsWith('app:hold:')) {
         if (!adminCheck(i)) return i.reply({ embeds: [ERR('Yetkin yok. 🔑')], ephemeral: true });
@@ -929,14 +1055,35 @@ client.on('interactionCreate', async (i) => {
         const st = STATE.get(sKey(i) + ':dm') || { exp: now() + 600000 };
         st.target = id.split(':')[2];
         STATE.set(sKey(i) + ':dm', st);
+        await i.deferUpdate().catch(() => {});
         if (st.target === 'uye') {
-          const modal = new ModalBuilder().setCustomId('dm:uye').setTitle('📢 Üye Seç');
-          modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('uye').setLabel('Üye ID veya mention').setStyle(TextInputStyle.Short).setRequired(true)));
-          return i.showModal(modal);
+          const raw = await collectChannel(i, '> **ÜYE SEÇ** — Üye ID, mention veya **Discord kullanıcı adı** yaz:');
+          if (!raw) return refresh(i, { embeds: [ERR('Süre doldu.')], components: [] });
+          let member = null;
+          const idm = (raw.match(/\d{17,20}/) || [null])[0];
+          if (idm) member = await i.guild.members.fetch(idm).catch(() => null);
+          if (!member) {
+            const q = raw.replace(/^@/, '').trim().toLowerCase();
+            member = i.guild.members.cache.find(m => m.user.username.toLowerCase() === q)
+              || i.guild.members.cache.find(m => (m.displayName || '').toLowerCase() === q)
+              || i.guild.members.cache.find(m => m.user.username.toLowerCase().includes(q));
+          }
+          if (!member) return refresh(i, { embeds: [ERR('Üye bulunamadı. ID, mention veya doğru kullanıcı adı dene.')], components: [] });
+          st.member = member.id;
+          STATE.set(sKey(i) + ':dm', st);
         }
-        const modal = new ModalBuilder().setCustomId('dm:metin').setTitle('📢 DM Metni');
-        modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('metin').setLabel('Gönderilecek mesaj (markdown serbest)').setStyle(TextInputStyle.Paragraph).setMaxLength(1900).setRequired(true)));
-        return i.showModal(modal);
+        const metin = await collectChannel(i, '> **DM METNİ** — Gönderilecek mesajı yaz (markdown serbest):');
+        if (!metin) return refresh(i, { embeds: [ERR('Süre doldu.')], components: [] });
+        st.metin = metin;
+        STATE.set(sKey(i) + ':dm', st);
+        const hedef = st.target === 'everyone' ? 'Tüm üyeler' : st.target === 'here' ? 'Çevrimiçi üyeler' : `<@${st.member}>`;
+        return i.followUp({
+          embeds: [E().setTitle('📢 DM ÖNİZLEME').setDescription(`**Hedef:** ${hedef}\n\n> ${st.metin}`)],
+          components: [new ActionRowBuilder().addComponents(
+            new ButtonBuilder().setCustomId('dm:onay').setLabel('Gönder').setStyle(ButtonStyle.Success),
+            new ButtonBuilder().setCustomId('dm:iptal').setLabel('İptal').setStyle(ButtonStyle.Danger))],
+          ephemeral: true
+        });
       }
       if (id === 'dm:onay') {
         const st = STATE.get(sKey(i) + ':dm');
@@ -979,18 +1126,18 @@ client.on('interactionCreate', async (i) => {
     }
     if (i.isChannelSelectMenu()) {
       const id = i.customId; const ch = i.channels.first();
-      if (id === 'tk:kanal') { const st = STATE.get(sKey(i) + ':tk') || {}; st.kanal = ch.id; STATE.set(sKey(i) + ':tk', st); return i.update({ embeds: [E().setDescription(`> Panel kanalı: ${ch}\n> Rolleri seç (opsiyonel) ve **Devam**.`)] }); }
-      if (id === 'mq:kanal') { const st = STATE.get(sKey(i) + ':mq') || {}; st.kanal = ch.id; STATE.set(sKey(i) + ':mq', st); return i.update({ embeds: [E().setDescription(`> Panel kanalı: ${ch}`)] }); }
-      if (id === 'app:kanal') { const st = STATE.get(sKey(i) + ':app'); if (st) st.kanal = ch.id; return i.update({ embeds: [E().setDescription(`> Panel kanalı: ${ch}`)] }); }
-      if (id === 'app:log') { const st = STATE.get(sKey(i) + ':app'); if (st) st.log = ch.id; return i.update({ embeds: [E().setDescription(`> Log kanalı: ${ch}`)] }); }
-      if (id === 'ann:kanal') { const st = STATE.get(sKey(i) + ':ann'); if (st) st.kanal = ch.id; return annPreviewUpdate(i); }
+      if (id === 'tk:kanal') { const st = STATE.get(sKey(i) + ':tk') || {}; st.kanal = ch.id; STATE.set(sKey(i) + ':tk', st); return refresh(i, { embeds: [E().setDescription(`> Panel kanalı: ${ch}\n> Rolleri seç (opsiyonel) ve **Devam**.`)] }); }
+      if (id === 'mq:kanal') { const st = STATE.get(sKey(i) + ':mq') || {}; st.kanal = ch.id; STATE.set(sKey(i) + ':mq', st); return refresh(i, { embeds: [E().setDescription(`> Panel kanalı: ${ch}`)] }); }
+      if (id === 'app:kanal') { const st = STATE.get(sKey(i) + ':app'); if (st) st.kanal = ch.id; return refresh(i, { embeds: [E().setDescription(`> Panel kanalı: ${ch}`)] }); }
+      if (id === 'app:log') { const st = STATE.get(sKey(i) + ':app'); if (st) st.log = ch.id; return refresh(i, { embeds: [E().setDescription(`> Log kanalı: ${ch}`)] }); }
+      if (id === 'ann:kanal') { const st = STATE.get(sKey(i) + ':ann'); if (st) st.kanal = ch.id; return annPreview(i); }
     }
     if (i.isRoleSelectMenu()) {
       const id = i.customId;
-      if (id === 'tk:rol') { const st = STATE.get(sKey(i) + ':tk') || {}; st.roller = i.roles.map(r => r.id); STATE.set(sKey(i) + ':tk', st); return i.update({ embeds: [E().setDescription(`> Etiket roller: ${i.roles.map(r => r.toString()).join(' ') || 'yok'}`)] }); }
-      if (id === 'mq:rol') { const st = STATE.get(sKey(i) + ':mq') || {}; st.roller = i.roles.map(r => r.id); STATE.set(sKey(i) + ':mq', st); return i.update({ embeds: [E().setDescription(`> Etiket roller: ${i.roles.map(r => r.toString()).join(' ') || 'yok'}`)] }); }
-      if (id === 'app:rol') { const st = STATE.get(sKey(i) + ':app'); if (st) st.rol = i.roles.first() ? i.roles.first().id : null; return i.update({ embeds: [E().setDescription(`> Kabul rolü: ${i.roles.first() || 'yok'}`)] }); }
-      if (id === 'ann:rol') { const st = STATE.get(sKey(i) + ':ann'); if (st) st.rol = i.roles.first() ? i.roles.first().id : null; return annPreviewUpdate(i); }
+      if (id === 'tk:rol') { const st = STATE.get(sKey(i) + ':tk') || {}; st.roller = i.roles.map(r => r.id); STATE.set(sKey(i) + ':tk', st); return refresh(i, { embeds: [E().setDescription(`> Etiket roller: ${i.roles.map(r => r.toString()).join(' ') || 'yok'}`)] }); }
+      if (id === 'mq:rol') { const st = STATE.get(sKey(i) + ':mq') || {}; st.roller = i.roles.map(r => r.id); STATE.set(sKey(i) + ':mq', st); return refresh(i, { embeds: [E().setDescription(`> Etiket roller: ${i.roles.map(r => r.toString()).join(' ') || 'yok'}`)] }); }
+      if (id === 'app:rol') { const st = STATE.get(sKey(i) + ':app'); if (st) st.rol = i.roles.first() ? i.roles.first().id : null; return refresh(i, { embeds: [E().setDescription(`> Kabul rolü: ${i.roles.first() || 'yok'}`)] }); }
+      if (id === 'ann:rol') { const st = STATE.get(sKey(i) + ':ann'); if (st) st.rol = i.roles.first() ? i.roles.first().id : null; return annPreview(i); }
     }
     if (i.isStringSelectMenu()) {
       const id = i.customId;
@@ -1002,101 +1149,10 @@ client.on('interactionCreate', async (i) => {
         st.mention = i.values[0];
         if (st.mention === 'rol') {
           const rows = i.message.components.slice();
-          rows.push(new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('ann:rol').setPlaceholder('Ping rolü').setMinValues(1).setMaxValues(1)));
+          if (!rows.some(r => r.components.some(c => c.customId === 'ann:rol'))) rows.push(new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('ann:rol').setPlaceholder('Ping rolü').setMinValues(1).setMaxValues(1)));
           return i.update({ components: rows });
         }
-        return annPreviewUpdate(i);
-      }
-    }
-    if (i.isModalSubmit()) {
-      const id = i.customId;
-      if (id === 'tk:ayar') {
-        const st = STATE.get(sKey(i) + ':tk');
-        st.thumb = i.fields.getTextInputValue('thumb') || null;
-        st.metin = i.fields.getTextInputValue('metin');
-        if (st.mode === 'kategorili') {
-          const m2 = new ModalBuilder().setCustomId('tk:kats').setTitle('🛠️ Kategoriler');
-          m2.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('kats').setLabel('Her satıra 1 kategori (max 10)').setStyle(TextInputStyle.Paragraph).setMaxLength(300).setRequired(true)));
-          return i.showModal(m2);
-        }
-        return finalizeTicket(i, st, []);
-      }
-      if (id === 'tk:kats') {
-        const st = STATE.get(sKey(i) + ':tk');
-        const cats = i.fields.getTextInputValue('kats').split('\n').map(s => s.trim()).filter(Boolean).slice(0, 10);
-        return finalizeTicket(i, st, cats);
-      }
-      if (id.startsWith('ann:modal:')) {
-        const st = {
-          exp: now() + 600000, type: id.split(':')[2],
-          baslik: i.fields.getTextInputValue('baslik'), icerik: i.fields.getTextInputValue('icerik'),
-          thumb: i.fields.getTextInputValue('thumb') || null, image: i.fields.getTextInputValue('image') || null,
-          renk: i.fields.getTextInputValue('renk') || null, kanal: i.channel ? i.channel.id : null, mention: 'yok', rol: null
-        };
-        STATE.set(sKey(i) + ':ann', st);
-        return annPreviewUpdate(i, true);
-      }
-      if (id === 'app:metinmodal') {
-        const st = STATE.get(sKey(i) + ':app');
-        st.metin = { baslik: i.fields.getTextInputValue('baslik'), acik: i.fields.getTextInputValue('acik') };
-        return appSetupUpdate(i);
-      }
-      if (id === 'app:soru') {
-        const st = STATE.get(sKey(i) + ':app');
-        st.sorular.push(i.fields.getTextInputValue('soru'));
-        return appSetupUpdate(i);
-      }
-      if (id.startsWith('app:page:')) {
-        const page = parseInt(id.split(':')[2]);
-        const st = STATE.get('appfill:' + i.guild.id + ':' + i.user.id);
-        const conf = gconf(i.guild.id).app;
-        i.components.forEach(row => row.components.forEach(f => st.answers.push(f.value)));
-        const next = page + 1;
-        if (next * 5 < conf.sorular.length) return appPageModal(i, next);
-        const aid = rnd(1000, 9999);
-        const qa = conf.sorular.map((q, x) => ({ q, a: st.answers[x] || '-' }));
-        DB.apps[aid] = { id: aid, guild: i.guild.id, user: i.user.id, qa, status: 'YENİ', time: now() };
-        STATE.delete('appfill:' + i.guild.id + ':' + i.user.id);
-        const logCh = i.guild.channels.cache.get(conf.log);
-        if (logCh) await logCh.send({
-          embeds: [appLogEmbed(DB.apps[aid])],
-          components: [new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId(`app:view:${aid}`).setLabel('👀 Başvuruyu Gör').setStyle(ButtonStyle.Secondary),
-            new ButtonBuilder().setCustomId(`app:accept:${aid}`).setLabel('Kabul Et').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId(`app:reject:${aid}`).setLabel('Reddet').setStyle(ButtonStyle.Danger),
-            new ButtonBuilder().setCustomId(`app:hold:${aid}`).setLabel('Beklemeye Al').setStyle(ButtonStyle.Secondary))]
-        });
-        return i.reply({ embeds: [OKC('Başvurun alındı! 📋 Sonuç DM ile bildirilecek.')], ephemeral: true });
-      }
-      if (id.startsWith('app:rejectmod:')) {
-        const a = DB.apps[id.split(':')[2]];
-        if (!a) return i.reply({ embeds: [ERR('Bulunamadı.')], ephemeral: true });
-        const sebep = i.fields.getTextInputValue('sebep');
-        a.status = 'RED';
-        dmUser(await client.users.fetch(a.user), E(0xED4245).setDescription(`> **📋 BAŞVURU SONUCU**\n**${i.guild.name}** adlı sunucuda başvurunuz **reddedildi**.\n> Reddedilme sebebi: ${sebep}`));
-        await appLogUpdate(i, a);
-        return i.reply({ embeds: [OKC('Başvuru reddedildi, kullanıcıya sebepli DM atıldı.')], ephemeral: true });
-      }
-      if (id === 'dm:uye') {
-        const st = STATE.get(sKey(i) + ':dm');
-        const mid = (i.fields.getTextInputValue('uye').match(/\d{17,20}/) || [null])[0];
-        if (!mid) return i.reply({ embeds: [ERR('Geçersiz ID/mention.')], ephemeral: true });
-        st.member = mid;
-        const modal = new ModalBuilder().setCustomId('dm:metin').setTitle('📢 DM Metni');
-        modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId('metin').setLabel('Gönderilecek mesaj').setStyle(TextInputStyle.Paragraph).setMaxLength(1900).setRequired(true)));
-        return i.showModal(modal);
-      }
-      if (id === 'dm:metin') {
-        const st = STATE.get(sKey(i) + ':dm');
-        st.metin = i.fields.getTextInputValue('metin');
-        const hedef = st.target === 'everyone' ? 'Tüm üyeler' : st.target === 'here' ? 'Çevrimiçi üyeler' : `<@${st.member}>`;
-        return i.reply({
-          embeds: [E().setTitle('📢 DM ÖNİZLEME').setDescription(`**Hedef:** ${hedef}\n\n> ${st.metin}`)],
-          components: [new ActionRowBuilder().addComponents(
-            new ButtonBuilder().setCustomId('dm:onay').setLabel('Gönder').setStyle(ButtonStyle.Success),
-            new ButtonBuilder().setCustomId('dm:iptal').setLabel('İptal').setStyle(ButtonStyle.Danger))],
-          ephemeral: true
-        });
+        return annPreview(i);
       }
     }
   } catch (e) {
@@ -1107,66 +1163,6 @@ client.on('interactionCreate', async (i) => {
     } catch (e2) {}
   }
 });
-
-async function finalizeTicket(i, st, cats) {
-  const ch = i.guild.channels.cache.get(st.kanal);
-  gconf(i.guild.id).ticket = { mode: st.mode, channel: st.kanal, roles: st.roller || [], thumb: st.thumb, text: st.metin, cats, categoryId: null };
-  const eb = E().setTitle('🛠️ HELP & SUPPORT').setDescription(st.metin);
-  if (st.thumb && st.thumb.startsWith('http')) eb.setThumbnail(st.thumb);
-  const comps = [];
-  if (st.mode === 'kategorili' && cats.length) comps.push(new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('tk:secim').setPlaceholder('Ticket kategorisi seç...').addOptions(cats.map(c => ({ label: c, value: c })))));
-  else comps.push(new ActionRowBuilder().addComponents(new ButtonBuilder().setCustomId('tkpanel:create').setLabel('Ticket Oluştur').setStyle(ButtonStyle.Primary)));
-  await ch.send({ embeds: [eb], components: comps });
-  STATE.delete(sKey(i) + ':tk');
-  return i.update({ embeds: [OKC(`Ticket paneli kuruldu: ${ch}`)], components: [] });
-}
-async function annPreviewUpdate(i, first = false) {
-  const st = STATE.get(sKey(i) + ':ann');
-  if (!st) return;
-  const rows = [
-    new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('ann:kanal').setPlaceholder('Hedef kanal (boşsa mevcut)').setChannelTypes([ChannelType.GuildText])),
-    new ActionRowBuilder().addComponents(new StringSelectMenuBuilder().setCustomId('ann:mention').setPlaceholder('Etiket seç...').addOptions({ label: 'Etiket Yok', value: 'yok' }, { label: '@everyone', value: 'everyone' }, { label: '@here', value: 'here' }, { label: 'Rol', value: 'rol' })),
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('ann:gonder').setLabel('Duyuruyu Gönder 📢').setStyle(ButtonStyle.Success),
-      new ButtonBuilder().setCustomId('ann:iptal').setLabel('İptal').setStyle(ButtonStyle.Danger))
-  ];
-  return i.update({ embeds: [annEmbed(st, i.user).setTitle('ÖNİZLEME')], components: rows });
-}
-function appLogEmbed(a) {
-  const renk = a.status === 'KABUL' ? 0x57F287 : a.status === 'RED' ? 0xED4245 : a.status === 'İNCELEMEDE' ? 0xFEE75C : 0x5865F2;
-  return E(renk).setTitle(`📋 YENİ BAŞVURU #${a.id}`).setDescription(`**Başvuran:** <@${a.user}> (${a.user})\n**Tarih:** <t:${Math.floor(a.time / 1000)}:f>\n**Durum:** \`${a.status}\`\n**Soru sayısı:** ${a.qa.length}\n\n> İçeriği görmek için **Başvuruyu Gör** (yalnızca yönetici 🔑)`);
-}
-async function appLogUpdate(i, a) {
-  try { await i.message.edit({ embeds: [appLogEmbed(a)], components: [i.message.components[0]] }); } catch (e) {}
-  saveDB();
-}
-function appPageModal(i, page) {
-  const conf = gconf(i.guild.id).app;
-  const qs = conf.sorular.slice(page * 5, page * 5 + 5);
-  const modal = new ModalBuilder().setCustomId(`app:page:${page}`).setTitle(`📋 Başvuru Formu (${page + 1}/${Math.ceil(conf.sorular.length / 5)})`);
-  qs.forEach((q, x) => modal.addComponents(new ActionRowBuilder().addComponents(new TextInputBuilder().setCustomId(`q${page * 5 + x}`).setLabel(q.slice(0, 45)).setStyle(TextInputStyle.Paragraph).setMaxLength(800).setRequired(true))));
-  return i.showModal(modal);
-}
-async function appSetupUpdate(i) {
-  const st = STATE.get(sKey(i) + ':app');
-  const rows = [
-    new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('app:kanal').setPlaceholder('Panel kanalı').setChannelTypes([ChannelType.GuildText])),
-    new ActionRowBuilder().addComponents(new ChannelSelectMenuBuilder().setCustomId('app:log').setPlaceholder('Log kanalı').setChannelTypes([ChannelType.GuildText])),
-    new ActionRowBuilder().addComponents(new RoleSelectMenuBuilder().setCustomId('app:rol').setPlaceholder('Kabul rolü (opsiyonel)').setMinValues(0).setMaxValues(1)),
-    new ActionRowBuilder().addComponents(
-      new ButtonBuilder().setCustomId('app:metin').setLabel('Panel Metni').setStyle(ButtonStyle.Primary),
-      new ButtonBuilder().setCustomId('app:addsoru').setLabel('Soru Ekle').setStyle(ButtonStyle.Secondary),
-      new ButtonBuilder().setCustomId('app:kur').setLabel('Sistemi Kur').setStyle(ButtonStyle.Success))
-  ];
-  if (st.sorular.length) {
-    const btns = st.sorular.map((s, x) => new ButtonBuilder().setCustomId(`app:sorusil:${x}`).setLabel(`✕ ${x + 1}. ${s.slice(0, 20)}`).setStyle(ButtonStyle.Danger));
-    for (let x = 0; x < btns.length; x += 5) rows.push(new ActionRowBuilder().addComponents(btns.slice(x, x + 5)));
-  }
-  return i.update({
-    embeds: [E().setTitle('📋 Başvuru Kurulum').setDescription(`**Panel:** ${st.kanal ? `<#${st.kanal}>` : '❌'}\n**Log:** ${st.log ? `<#${st.log}>` : '❌'}\n**Kabul rolü:** ${st.rol ? `<@&${st.rol}>` : '—'}\n**Metin:** ${st.metin ? '✅' : '❌'}\n**Sorular (${st.sorular.length}):**\n${st.sorular.map((s, x) => `> \`{${x + 1}}\` ${s}`).join('\n') || '> yok'}`)],
-    components: rows
-  });
-}
 
 /* ========================= OLAYLAR ========================= */
 client.once('ready', async () => {
@@ -1202,7 +1198,7 @@ client.on('messageCreate', async (m) => {
   }
 });
 
-/* ---------- ZAMANLAYICI: çekiliş + sayaç ---------- */
+/* ---------- ZAMANLAYICI ---------- */
 setInterval(async () => {
   for (const [id, g] of Object.entries(DB.giveaways)) {
     if (g.ended) continue;
@@ -1232,16 +1228,19 @@ process.on('uncaughtException', (e) => console.error('UNCAUGHT:', e));
 client.on('debug', (m) => console.log('[WS]', m));
 client.on('error', (e) => console.error('[CLIENT ERROR]', e));
 
-/* Render keep-alive (zararsız) */
 require('http').createServer((q, s) => { s.writeHead(200); s.end('Studioblox online'); }).listen(process.env.PORT || 8080);
 
-/* NET PROBE: discord API'ye ulaşabiliyor muyuz? */
-fetch('https://discord.com/api/v10/gateway')
-  .then(r => r.json())
-  .then(j => console.log('[NET] REST OK, gateway:', j.url))
-  .catch(e => console.error('[NET] REST HATA:', e.message));
+(async () => {
+  const urls = ['https://api.github.com/zen', 'https://discord.com/api/v10/gateway'];
+  for (const url of urls) {
+    try {
+      const r = await fetch(url, { headers: { 'User-Agent': 'DiscordBot (https://github.com/Phiec31691q, 1.0)', 'Accept': 'application/json' } });
+      const t = await r.text();
+      console.log(`[NET] ${url} -> ${r.status} | body=${t.slice(0, 80).replace(/\n/g, ' ')}`);
+    } catch (e) { console.error('[NET] fetch hata:', url, e.message); }
+  }
+})();
 
-/* WATCHDOG: 60 sn içinde READY olmazsa kendini restartla (Render yeniden dener) */
 setTimeout(() => {
   if (!client.isReady()) { console.error('[STUDIOBLOX] 60sn gecti, gateway READY olmadi -> restart'); process.exit(1); }
 }, 60000);
