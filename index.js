@@ -1,4 +1,10 @@
+/* ========= NETWORK FIX (Render + yeni Node gateway donması) ========= */
 require('net').setDefaultAutoSelectFamily(false);
+try { require('net').setDefaultAutoSelectFamilyAttemptTimeout(200); } catch (e) {}
+try {
+  const { setGlobalDispatcher, Agent } = require('undici');
+  setGlobalDispatcher(new Agent({ connect: { autoSelectFamily: false }, headersTimeout: 30000, bodyTimeout: 30000 }));
+} catch (e) { console.error('[NET] undici dispatcher ayarlanamadi:', e.message); }
 /* ============================================================
    STUDIOBLOX v1.0.0 - PROFESYONEL DISCORD BOTU (TEK DOSYA)
    Secret'lar environment'tan okunur, GitHub'a token YAZMA.
@@ -1228,6 +1234,17 @@ client.on('error', (e) => console.error('[CLIENT ERROR]', e));
 
 /* Render keep-alive (zararsız) */
 require('http').createServer((q, s) => { s.writeHead(200); s.end('Studioblox online'); }).listen(process.env.PORT || 8080);
+
+/* NET PROBE: discord API'ye ulaşabiliyor muyuz? */
+fetch('https://discord.com/api/v10/gateway')
+  .then(r => r.json())
+  .then(j => console.log('[NET] REST OK, gateway:', j.url))
+  .catch(e => console.error('[NET] REST HATA:', e.message));
+
+/* WATCHDOG: 60 sn içinde READY olmazsa kendini restartla (Render yeniden dener) */
+setTimeout(() => {
+  if (!client.isReady()) { console.error('[STUDIOBLOX] 60sn gecti, gateway READY olmadi -> restart'); process.exit(1); }
+}, 60000);
 
 initDB()
   .then(() => {
