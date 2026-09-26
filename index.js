@@ -972,7 +972,7 @@ client.on('interactionCreate', async (i) => {
     }
     if (i.isChannelSelectMenu()) {
       const id = i.customId; const ch = i.channels.first();
-      if (id === 'tk:kanal') { const st = STATE.get(sKey(i) + ':tk') || {}; st.kanal = ch.id; STATE.set(sKey(i) + ':tk', st); return i.update({ embeds: [E().setDescription(`> Panel kanalı: ${ch}\n> Rollerı seç (opsiyonel) ve **Devam**.`)] }); }
+      if (id === 'tk:kanal') { const st = STATE.get(sKey(i) + ':tk') || {}; st.kanal = ch.id; STATE.set(sKey(i) + ':tk', st); return i.update({ embeds: [E().setDescription(`> Panel kanalı: ${ch}\n> Rolleri seç (opsiyonel) ve **Devam**.`)] }); }
       if (id === 'mq:kanal') { const st = STATE.get(sKey(i) + ':mq') || {}; st.kanal = ch.id; STATE.set(sKey(i) + ':mq', st); return i.update({ embeds: [E().setDescription(`> Panel kanalı: ${ch}`)] }); }
       if (id === 'app:kanal') { const st = STATE.get(sKey(i) + ':app'); if (st) st.kanal = ch.id; return i.update({ embeds: [E().setDescription(`> Panel kanalı: ${ch}`)] }); }
       if (id === 'app:log') { const st = STATE.get(sKey(i) + ':app'); if (st) st.log = ch.id; return i.update({ embeds: [E().setDescription(`> Log kanalı: ${ch}`)] }); }
@@ -1219,9 +1219,19 @@ setInterval(async () => {
 }, 30000);
 setInterval(() => { client.guilds.cache.forEach(g => updateUC(g)); }, 600000);
 
+/* ========================= TEŞHİS + BAŞLATMA ========================= */
 process.on('unhandledRejection', (e) => console.error('UR:', e));
+process.on('uncaughtException', (e) => console.error('UNCAUGHT:', e));
+client.on('debug', (m) => console.log('[WS]', m));
+client.on('error', (e) => console.error('[CLIENT ERROR]', e));
 
 /* Render keep-alive (zararsız) */
 require('http').createServer((q, s) => { s.writeHead(200); s.end('Studioblox online'); }).listen(process.env.PORT || 8080);
 
-initDB().then(() => client.login(CONFIG.token)).catch(e => { console.error('DB/login hatasi:', e); process.exit(1); });
+initDB()
+  .then(() => {
+    console.log('[STUDIOBLOX] Token uzunlugu:', (CONFIG.token || '').trim().length);
+    return client.login(CONFIG.token.trim());
+  })
+  .then(() => console.log('[STUDIOBLOX] login promise cozuldu'))
+  .catch(e => { console.error('LOGIN/DB HATA:', e); process.exit(1); });
